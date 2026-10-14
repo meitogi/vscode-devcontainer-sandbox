@@ -1,0 +1,36 @@
+{
+  "name": "devcontainer-sandbox",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.0",
+  "publisher": "meitogi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meitogi/vscode-devcontainer-sandbox.git"
+  },
+  "engines": {
+    "vscode": "^1.120.0"
+  },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/src/extension.js",
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . -w",
+    "test": "tsc -p . && node --test 'out/test/*.test.js'",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/vscode": "1.120.0",
+    "@vscode/vsce": "4.0.0",
+    "typescript": "7.0.2"
+  }
+}

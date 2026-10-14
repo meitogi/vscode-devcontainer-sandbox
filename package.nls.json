@@ -1,0 +1,4 @@
+{
+  "displayName": "Devcontainer Sandbox",
+  "description": "See, update and roll back the Claude Code patchers and the base image of a Sandbox devcontainer."
+}
