@@ -1,0 +1,94 @@
+# Release meitogi.devcontainer-sandbox on a v* tag
+#
+# build: checks the tag (version + two-section notes), runs the tests, packages
+# devcontainer-sandbox-<version>.vsix. release: publishes the tag's annotation
+# as a GitHub Release with that .vsix attached — the asset the Sandbox image
+# installs at a pinned version. The notes format is RELEASING.md.
+# Third-party actions are pinned to commit SHAs (comment = tag at pin time,
+# 2026-10-14); bump deliberately, never float.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      vsix: ${{ steps.package.outputs.vsix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - name: tag matches package.json version
+        run: |
+          v="$(jq -r '.version' package.json)"
+          if [ "${GITHUB_REF_NAME}" != "v${v}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} != package.json version v${v} — bump package.json first"
+            exit 1
+          fi
+      - name: tag carries two-section release notes
+        run: |
+          # The annotation is what the release job publishes (RELEASING.md,
+          # "Release notes"). Checked first: a bad tag fails before npm runs.
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          if [ "$(git cat-file -t "${GITHUB_REF_NAME}")" != "tag" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} is lightweight — the notes live in the annotation: git tag -a --cleanup=verbatim -F <notes> (RELEASING.md, Release notes)"
+            exit 1
+          fi
+          notes="$(git tag -l "${GITHUB_REF_NAME}" --format='%(contents)')"
+          for h in "## What's new" '## Technical'; do
+            if ! printf '%s\n' "$notes" | grep -qx -- "$h"; then
+              echo "::error::tag ${GITHUB_REF_NAME} lacks the '${h}' heading — git's default cleanup drops '#' lines; tag with --cleanup=verbatim (RELEASING.md, Release notes)"
+              exit 1
+            fi
+          done
+          if ! printf '%s\n' "$notes" | awk '/^## What.s new$/{f=1;next} /^## Technical$/{f=0} f&&NF{n++} END{exit n?0:1}'; then
+            echo "::error::tag ${GITHUB_REF_NAME} has nothing under \"## What's new\" — one line is mandatory (RELEASING.md, Release notes)"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm test
+      - id: package
+        run: |
+          vsix="devcontainer-sandbox-${GITHUB_REF_NAME#v}.vsix"
+          npx vsce package --out "$vsix"
+          echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vsix
+          path: ${{ steps.package.outputs.vsix }}
+          if-no-files-found: error
+
+  # The write token lives here only, in a job that runs no npm code: what
+  # `npm ci` installs never sees contents: write. It ships the exact .vsix
+  # `build` tested and packaged.
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: vsix
+      # gh reads the notes from the LOCAL clone (`git tag --list <tag>
+      # --format=%(contents)`), so the annotated tag object must be here.
+      # checkout >= 6.0.2 keeps it (actions/checkout#290); the explicit fetch
+      # makes this job independent of that.
+      - name: fetch the annotated tag
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+      - name: create the GitHub Release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "${{ needs.build.outputs.vsix }}" \
+            --verify-tag --notes-from-tag \
+            --title "$(git tag -l "${GITHUB_REF_NAME}" --format='%(contents:subject)')"
